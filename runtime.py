@@ -15,7 +15,7 @@ from api import Channels, explain_error, private_recipient_unavailable, expired_
 from database import Database, SQLiteStorage
 from handlers import build_routers
 from service import Service
-from settings import ROOT
+from settings import ROOT, read_environment
 
 log = logging.getLogger(__name__)
 
@@ -24,17 +24,23 @@ class RedactingFormatter(logging.Formatter):
     def __init__(self, token):
         super().__init__("%(asctime)s %(levelname)s %(name)s: %(message)s")
         self.token = token
+        self.flyer_key = str(read_environment().get('FLYER_BOT_KEY') or '')
 
     def format(self, record):
         text = super().format(record).replace(self.token, "<BOT_TOKEN>")
+        if self.flyer_key:
+            text = text.replace(self.flyer_key, '<FLYER_BOT_KEY>')
         return re.sub(r"\b\d{5,15}:[A-Za-z0-9_-]{20,}\b", "<BOT_TOKEN>", text)
 
 
 def configure_logging(token):
     folder = ROOT / "data"
-    folder.mkdir(exist_ok=True)
-    handlers = [logging.StreamHandler(), RotatingFileHandler(
-        folder / "bot.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8")]
+    handlers = [logging.StreamHandler()]
+    try:
+        folder.mkdir(exist_ok=True)
+        handlers.append(RotatingFileHandler(folder / 'bot.log', maxBytes=1_000_000, backupCount=2, encoding='utf-8'))
+    except OSError:
+        print('Файловый журнал недоступен; журнал выводится в консоль.')
     for handler in handlers:
         handler.setFormatter(RedactingFormatter(token))
     logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)

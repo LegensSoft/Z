@@ -73,7 +73,7 @@ def admin_keyboard():
                     [("Реклама", "a:ads"), ("Спонсоры", "a:sponsors")],
                     [("Заготовки выдачи", "a:templates")],
                     [("Файлы", "a:files:0"), ("Диагностика", "a:diagnostics")],
-                    [("Моя подписка", "a:mysub")],
+                    [("Пропуск подписок", "a:mysub"), ("FlyerHubs", "a:flyer")],
                     [("Каналы", "a:channels")],
                     [("Продолжить черновик", "a:resume")])
 
@@ -233,15 +233,30 @@ def build_routers(service):
 
     async def my_subscription_status(message):
         enabled = db.admin_subscription_enabled(next(iter(cfg.admin_ids)))
-        await panel(message, "Проверка подписки для твоего аккаунта: "
-                             + ("включена." if enabled else "выключена.")
-                             + "\nЭта настройка не влияет на остальных пользователей.",
-                             reply_markup=keyboard([("Выключить" if enabled else "Включить", "a:togglemycheck")],
+        await panel(message, "Пропуск подписок для тебя: "
+                             + ("выключен." if enabled else "включён.")
+                             + "\nПропускает каналы и FlyerHubs только для администратора.",
+                             reply_markup=keyboard([("Включить пропуск" if enabled else "Выключить пропуск", "a:togglemycheck")],
                                                    [("Меню", "a:menu")]))
 
     @admin.message(Command("mysub"))
     async def own_subscription_command(message: Message):
         await my_subscription_status(message)
+
+    @admin.callback_query(F.data.in_({'a:flyer', 'a:flyer:check'}))
+    async def flyer_status(callback: CallbackQuery):
+        await callback.answer()
+        from flyer import FlyerError
+        text = ('FlyerHubs: ' + ('включён' if cfg.flyer_enabled else 'выключен')
+                + '\nКлюч: ' + ('задан' if cfg.flyer_bot_key else 'не задан')
+                + '\nДля подключения задай FLYER_BOT_KEY и FLYER_ENABLED=1 в .env или окружении, затем перезапусти бота.')
+        if callback.data == 'a:flyer:check':
+            try:
+                await service.flyer.get_me()
+                text += '\nAPI: активный бот sub, подключение успешно.'
+            except FlyerError as exc:
+                text += '\nAPI: ' + str(exc)
+        await panel(callback, text, reply_markup=keyboard([('Проверить API', 'a:flyer:check')], [('Назад', 'a:menu')]))
 
     @admin.callback_query(F.data == "a:mysub")
     async def own_subscription_menu(callback: CallbackQuery):

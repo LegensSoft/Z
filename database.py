@@ -413,7 +413,7 @@ class Database:
 
     def admin_subscription_enabled(self, user_id):
         row = self.one("SELECT subscription_enabled FROM admin_preferences WHERE user_id=?", (user_id,))
-        return True if row is None else bool(row["subscription_enabled"])
+        return False if row is None else bool(row["subscription_enabled"])
 
     def set_admin_subscription_enabled(self, user_id, enabled):
         self.execute("INSERT INTO admin_preferences(user_id,subscription_enabled) VALUES(?,?) "

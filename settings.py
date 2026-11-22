@@ -91,6 +91,9 @@ class Settings:
     path: Path = field(default_factory=lambda: ROOT / ".env", repr=False)
     warnings: list[str] = field(default_factory=list, repr=False)
     external_channels: frozenset[str] = field(default_factory=frozenset, repr=False)
+    flyer_bot_key: str = field(default='', repr=False)
+    flyer_enabled: bool = False
+    flyer_task_url: str = ''
 
     @classmethod
     def load(cls, path=None):
@@ -117,8 +120,14 @@ class Settings:
             cooldown = 2
         emoji = str(raw.get("CHANNEL_CUSTOM_EMOJI", "true")).strip().lower() in ("true", "1", "yes", "on")
         external = frozenset(k for k in ("STORAGE_CHANNEL_ID", "MAIN_CHANNEL_ID") if k in os.environ)
+        flyer_key = str(raw.get('FLYER_BOT_KEY') or '').strip()
+        flyer_enabled = str(raw.get('FLYER_ENABLED', '1' if flyer_key else '0')).lower().strip() in ('1','true','yes','on')
+        task_url = str(raw.get('FLYER_TASK_URL') or '').strip()
+        if task_url and (urlsplit(task_url).scheme != 'https' or not urlsplit(task_url).hostname):
+            raise ValueError('FLYER_TASK_URL должен быть полной HTTPS-ссылкой')
         return cls(token, frozenset({int(admin)}), **values, channel_custom_emoji=emoji,
-                   download_cooldown_seconds=cooldown, path=path, warnings=warnings, external_channels=external)
+                   download_cooldown_seconds=cooldown, path=path, warnings=warnings, external_channels=external,
+                   flyer_bot_key=flyer_key, flyer_enabled=flyer_enabled, flyer_task_url=task_url)
 
     def save_channels(self, storage=None, main=None):
         new_storage = self.storage_channel_id if storage is None else channel_ref(storage)

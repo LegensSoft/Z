@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from content import has_custom_emoji, send_content, url_keyboard, valid_url
 from api import Channels, explain_error, as_dict, private_recipient_unavailable
+from flyer import Flyer, FlyerError
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,10 @@ class Service:
         self.publish_lock = asyncio.Lock()
         self.recent = OrderedDict()
         self.alert_times = {}
+        self.flyer = Flyer(settings.flyer_bot_key)
+
+    def skips_subscriptions(self, user_id):
+        return user_id in self.settings.admin_ids and not self.db.admin_subscription_enabled(user_id)
 
     def channel_keyboard(self, url):
         """Единственная URL-кнопка — Telegram переносит её при forwardMessage."""
@@ -65,6 +70,8 @@ class Service:
                            url_keyboard("📥 Скачать", post["external_url"]))
 
     async def missing_subscriptions(self, user_id):
+        if self.skips_subscriptions(user_id):
+            return [], []
         # Каждое действие — новая проверка реальной подписки. Запросы к разным
         # спонсорам выполняем параллельно (не более трёх за раз).
         sponsors = self.db.sponsors()
@@ -89,20 +96,36 @@ class Service:
                 [item for status, item in results if status == "error"])
 
     async def require_subscription(self, user_id, action):
+        if self.skips_subscriptions(user_id):
+            self.db.execute('DELETE FROM pending_actions WHERE user_id=?', (user_id,))
+            return True
         missing, errors = await self.missing_subscriptions(user_id)
-        if not missing and not errors:
+        flyer_ok, flyer_error = True, None
+        if self.settings.flyer_enabled:
+            try:
+                flyer_ok = await self.flyer.check(user_id)
+            except FlyerError as exc:
+                flyer_ok, flyer_error = False, str(exc)
+        if not missing and not errors and flyer_ok:
             self.db.execute("DELETE FROM pending_actions WHERE user_id=?", (user_id,))
             return True
         token = secrets.token_hex(6)
         self.db.set_pending(user_id, token, action)
         rows = [[InlineKeyboardButton(text=s["title"][:64], url=s["url"])] for s in missing + errors]
+        if not flyer_ok and self.settings.flyer_task_url:
+            rows.append([InlineKeyboardButton(text='Задания FlyerHubs', url=self.settings.flyer_task_url)])
         rows.append([InlineKeyboardButton(text="Проверить подписку", callback_data=f"sub:{token}")])
         text = ("Для продолжения подпишитесь на указанные каналы, затем нажмите «Проверить подписку»."
                 if not errors else "Некоторые подписки сейчас не удалось проверить. Повторите попытку позднее. Администратор уведомлён.")
+        if not flyer_ok:
+            text = ('Проверка FlyerHubs временно не прошла. Повторите позже; администратор уведомлён.' if flyer_error
+                    else 'Выполните задания FlyerHubs и обязательные подписки, затем нажмите «Проверить подписку».')
         await self.bot.send_message(user_id, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         if errors:
             await self.notify_admins("Не работает проверка подписок:\n" + "\n".join(
                 f"{s['title']} ({s['chat_id']}): {s['reason']}" for s in errors), category="sponsor_check")
+        if flyer_error:
+            await self.notify_admins('Ошибка проверки FlyerHubs: ' + flyer_error, category='flyer_check')
         return False
 
     async def deliver(self, user_id, key, subscription_checked=False):

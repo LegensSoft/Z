@@ -48,8 +48,8 @@ class SubscriptionGate(BaseMiddleware):
         # Единственная служебная возможность выключить проверку ДЛЯ СЕБЯ:
         # доступна только администратору, даже когда он не подписан.
         command = (event.text or "").split(maxsplit=1)[0].split("@")[0] if not callback and event.text else ""
-        if is_admin and (command == "/mysub" or
-                         (callback and (event.data or "") == "a:togglemycheck")):
+        if is_admin and (command in ("/mysub", "/admin", "/diag", "/cancel") or
+                         (callback and (event.data or "") in ("a:mysub", "a:togglemycheck", "a:flyer", "a:flyer:check"))):
             return await handler(event, data)
         if is_admin and not self.service.db.admin_subscription_enabled(user.id):
             data["subscription_checked"] = True
